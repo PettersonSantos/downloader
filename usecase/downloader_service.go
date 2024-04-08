@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"sync"
 )
 
 type IDownloaderService interface {
@@ -21,19 +22,23 @@ func (impl *EventServiceImpl) ProcessDownload(urls []string, dirPath string) {
 	done := make(chan bool, len(urls))
 	errch := make(chan error, len(urls))
 
-	for _, URL := range urls {
+	var wg sync.WaitGroup
+	wg.Add(len(urls))
 
+	for _, URL := range urls {
 		go func(URL string) {
+			defer wg.Done()
 			b, err := download(URL, dirPath)
 			if err != nil {
 				errch <- err
-				done <- false
 				return
 			}
 			done <- b
-			errch <- nil
 		}(URL)
 	}
+	wg.Wait()
+	close(done)
+	close(errch)
 }
 
 func download(url string, dirPath string) (bool, error) {
@@ -44,7 +49,10 @@ func download(url string, dirPath string) (bool, error) {
 
 	filePath := path.Join(dirPath, fileName)
 
-	resp, _ := http.Get(url)
+	resp, err := http.Get(url)
+	if err != nil {
+		return false, err
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return false, errors.New(resp.Status)
